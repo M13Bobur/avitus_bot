@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pharm_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pharm_user
+      POSTGRES_PASSWORD: pharm_pass
+      POSTGRES_DB: pharm_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pharm_user -d pharm_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pharm_net
+
+  bot:
+    build: .
+    container_name: pharm_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pharm_user:pharm_pass@postgres:5432/pharm_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharm_net
+
+volumes:
+  postgres_data:
+
+networks:
+  pharm_net:
+    driver: bridge
