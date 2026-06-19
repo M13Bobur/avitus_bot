@@ -36,12 +36,25 @@ def _shorten_firm_name(name: str) -> str:
   return name[:FIRM_NAME_MAX_LEN].rstrip() + "…"
 
 
+from app.utils.telegram import truncate_button_text
+
+
+def _shorten_text(name: str, max_len: int) -> str:
+  name = name.strip()
+  if len(name) <= max_len:
+    return name
+  return name[: max_len - 1].rstrip() + "…"
+
+
 def user_button_label(user: User) -> str:
   if user.role == UserRole.SUPER_ADMIN.value:
-    return f"👑 {user.full_name} — Админ"
+    return truncate_button_text(f"👑 {_shorten_text(user.full_name, 40)} — Админ")
   if user.supplier is not None:
-    return f"{user.full_name} — {_shorten_firm_name(user.supplier.name)}"
-  return f"{user.full_name} — —"
+    branch = _shorten_text(user.branch.name if user.branch is not None else "—", 12)
+    firm = _shorten_text(user.supplier.name, 16)
+    name = _shorten_text(user.full_name, 20)
+    return truncate_button_text(f"{name} — {firm} ({branch})")
+  return truncate_button_text(f"{_shorten_text(user.full_name, 40)} — —")
 
 
 def users_list_keyboard(

@@ -35,8 +35,12 @@ class ExcelExportService:
   def __init__(self, inventory_repo: InventoryRepository) -> None:
     self._inventory_repo = inventory_repo
 
-  async def generate_supplier_report(self, supplier_id: int) -> tuple[str, int]:
-    records = await self._inventory_repo.get_by_supplier(supplier_id)
+  async def generate_supplier_report(
+    self, supplier_id: int, branch_id: int
+  ) -> tuple[str, int]:
+    records = await self._inventory_repo.get_by_supplier(
+      supplier_id, branch_id=branch_id
+    )
 
     data = [
       {
@@ -62,6 +66,7 @@ class ExcelExportService:
     logger.info(
       "excel_export_generated",
       supplier_id=supplier_id,
+      branch_id=branch_id,
       rows=len(data),
       file_path=file_path,
     )

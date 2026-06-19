@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.models import Supplier
+from app.database.models import Inventory, Supplier
 from app.repositories.base import BaseRepository
 
 
@@ -18,6 +18,18 @@ class SupplierRepository(BaseRepository[Supplier]):
   async def get_active_suppliers(self) -> list[Supplier]:
     result = await self._session.execute(
       select(Supplier).where(Supplier.is_active.is_(True))
+    )
+    return list(result.scalars().all())
+
+  async def get_active_suppliers_for_branch(self, branch_id: int) -> list[Supplier]:
+    result = await self._session.execute(
+      select(Supplier)
+      .join(Inventory, Inventory.supplier_id == Supplier.id)
+      .where(
+        Inventory.branch_id == branch_id,
+        Supplier.is_active.is_(True),
+      )
+      .distinct()
     )
     return list(result.scalars().all())
 

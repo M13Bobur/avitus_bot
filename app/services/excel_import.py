@@ -10,6 +10,7 @@ from app.utils.quantity import parse_quantity_value
 logger = get_logger(__name__)
 
 REQUIRED_COLUMNS = ["Филиал", "Поставщик", "Дата", "Наименование", "Кол-во"]
+REQUIRED_COLUMNS_WITHOUT_BRANCH = ["Поставщик", "Дата", "Наименование", "Кол-во"]
 
 # Alternative header names seen in real pharmacy exports.
 COLUMN_ALIASES: dict[str, list[str]] = {
@@ -83,14 +84,17 @@ def parse_quantity(value: object) -> Decimal | None:
 
 def validate_file_extension(file_name: str) -> None:
   lower = file_name.lower()
-  if not (lower.endswith(".xlsx") or lower.endswith(".xls")):
-    raise ExcelImportError("Invalid file format. Only Excel files (.xlsx, .xls) are accepted.")
+  if not lower.endswith(".xlsx"):
+    raise ExcelImportError("Invalid file format. Only Excel files (.xlsx) are accepted.")
 
 
-def _normalized_alias_set() -> dict[str, set[str]]:
+def _normalized_alias_set(*, include_branch: bool = True) -> dict[str, set[str]]:
+  aliases = COLUMN_ALIASES
+  if not include_branch:
+    aliases = {key: value for key, value in aliases.items() if key != "Филиал"}
   return {
-    canonical: {normalize_column_name(alias) for alias in aliases}
-    for canonical, aliases in COLUMN_ALIASES.items()
+    canonical: {normalize_column_name(alias) for alias in names}
+    for canonical, names in aliases.items()
   }
 
 
@@ -106,12 +110,14 @@ def _find_header_row(preview: pd.DataFrame, alias_sets: dict[str, set[str]]) -> 
   return None
 
 
-def _resolve_column_map(columns: list[str]) -> dict[str, str]:
+def _resolve_column_map(columns: list[str], *, include_branch: bool = True) -> dict[str, str]:
   normalized_columns = {normalize_column_name(col): col for col in columns}
   column_map: dict[str, str] = {}
   missing: list[str] = []
+  required = REQUIRED_COLUMNS if include_branch else REQUIRED_COLUMNS_WITHOUT_BRANCH
 
-  for canonical, aliases in COLUMN_ALIASES.items():
+  for canonical in required:
+    aliases = COLUMN_ALIASES[canonical]
     actual_name = None
     for alias in aliases:
       normalized_alias = normalize_column_name(alias)
@@ -134,9 +140,16 @@ def _resolve_column_map(columns: list[str]) -> dict[str, str]:
 
 
 class ExcelImportService:
-  def validate_and_read(self, file_path: str, file_name: str) -> list[ImportRow]:
+  def validate_and_read(
+    self,
+    file_path: str,
+    file_name: str,
+    *,
+    fixed_branch: str | None = None,
+  ) -> list[ImportRow]:
     validate_file_extension(file_name)
-    alias_sets = _normalized_alias_set()
+    include_branch = fixed_branch is None
+    alias_sets = _normalized_alias_set(include_branch=include_branch)
 
     try:
       preview = pd.read_excel(
@@ -167,14 +180,14 @@ class ExcelImportService:
       logger.error("excel_read_failed", file_name=file_name, error=str(exc))
       raise ExcelImportError(f"Failed to read Excel file: {exc}") from exc
 
-    column_map = _resolve_column_map(list(df.columns))
+    column_map = _resolve_column_map(list(df.columns), include_branch=include_branch)
 
     rows: list[ImportRow] = []
     seen: set[tuple[str, str, str, str]] = set()
     skipped = 0
 
     for _, row in df.iterrows():
-      branch = normalize_text(row[column_map["Филиал"]])
+      branch = fixed_branch or normalize_text(row[column_map["Филиал"]])
       supplier = normalize_text(row[column_map["Поставщик"]])
       medicine = normalize_text(row[column_map["Наименование"]])
       report_date = parse_date(row[column_map["Дата"]])

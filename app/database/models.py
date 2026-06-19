@@ -38,11 +38,15 @@ class User(Base):
   supplier_id: Mapped[int | None] = mapped_column(
     Integer, ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True
   )
+  branch_id: Mapped[int | None] = mapped_column(
+    Integer, ForeignKey("branches.id", ondelete="SET NULL"), nullable=True
+  )
   created_at: Mapped[datetime] = mapped_column(
     DateTime(timezone=True), server_default=func.now(), nullable=False
   )
 
   supplier: Mapped["Supplier | None"] = relationship("Supplier", back_populates="users")
+  branch: Mapped["Branch | None"] = relationship("Branch", back_populates="users")
 
 
 class Supplier(Base):
@@ -65,8 +69,11 @@ class Branch(Base):
   id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
   name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
 
+  users: Mapped[list["User"]] = relationship(
+    "User", back_populates="branch", passive_deletes=True
+  )
   inventory_records: Mapped[list["Inventory"]] = relationship(
-    "Inventory", back_populates="branch"
+    "Inventory", back_populates="branch", passive_deletes=True
   )
 
 

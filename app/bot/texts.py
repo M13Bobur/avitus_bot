@@ -2,9 +2,13 @@
 BTN_UPLOAD_EXCEL = "📤 Excel юклаш"
 BTN_STATISTICS = "📈 Статистика"
 BTN_SUPPLIERS = "🏭 Етказиб берувчилар"
+BTN_BRANCHES = "📍 Филиаллар"
 BTN_USERS = "👤 Фойдаланувчилар"
 BTN_SETTINGS = "⚙ Созламалар"
 BTN_CANCEL = "❌ Бекор қилиш"
+
+BTN_ADD_BRANCH = "➕ Филиал қўшиш"
+BTN_BRANCH_DELETE_CONFIRM = "✅ Ҳа, ўчириш"
 
 BTN_INVENTORY_REPORT = "📊 Инвентар ҳисоботи"
 BTN_BRANCH_REPORT = "📍 Филиал ҳисоботи"

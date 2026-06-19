@@ -4,11 +4,16 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.keyboards.menus import (
+  REG_BRANCH_PAGE_PREFIX,
+  REG_BRANCH_PREFIX,
   REG_PAGE_PREFIX,
   REG_SUPPLIER_PREFIX,
+  branches_selection_keyboard,
+  branches_selection_text,
   request_phone_keyboard,
   supplier_menu_keyboard,
   suppliers_selection_keyboard,
+  suppliers_selection_text,
 )
 from app.bot.states.registration import SupplierRegistrationStates
 from app.database.models import User, UserRole
@@ -83,21 +88,84 @@ async def process_password(
     return
 
   registration_service = SupplierRegistrationService(session)
-  suppliers = await registration_service.get_available_suppliers()
+  branches = await registration_service.get_branches()
 
-  if not suppliers:
+  if not branches:
     await state.clear()
     await message.answer(
-      "📭 Ҳозирча фирмалар рўйхати бўш.\n"
-      "Админ Excel юклагандан кейин /start ни қайта босинг."
+      "📭 Ҳозирча филиаллар рўйхати бўш.\n"
+      "Админ филиал қўшгандан кейин /start ни қайта босинг."
     )
     return
 
-  await state.set_state(SupplierRegistrationStates.waiting_company)
+  await state.set_state(SupplierRegistrationStates.waiting_branch)
   await message.answer(
-    "🏭 Фирмани танланг:",
+    branches_selection_text(branches, page=0, title="📍 Филиални танланг:"),
+    reply_markup=branches_selection_keyboard(branches, page=0),
+  )
+
+
+@router.callback_query(
+  StateFilter(SupplierRegistrationStates.waiting_branch),
+  F.data.startswith(REG_BRANCH_PAGE_PREFIX),
+)
+async def process_branch_page(
+  callback: CallbackQuery,
+  state: FSMContext,
+  session,
+) -> None:
+  page = int(callback.data.replace(REG_BRANCH_PAGE_PREFIX, ""))
+  registration_service = SupplierRegistrationService(session)
+  branches = await registration_service.get_branches()
+
+  await callback.message.edit_text(
+    branches_selection_text(branches, page=page, title="📍 Филиални танланг:"),
+    reply_markup=branches_selection_keyboard(branches, page=page),
+  )
+  await callback.answer()
+
+
+@router.callback_query(
+  StateFilter(SupplierRegistrationStates.waiting_branch),
+  F.data.startswith(REG_BRANCH_PREFIX),
+)
+async def process_branch_selection(
+  callback: CallbackQuery,
+  state: FSMContext,
+  session,
+) -> None:
+  branch_id = int(callback.data.replace(REG_BRANCH_PREFIX, ""))
+
+  from app.repositories.branch import BranchRepository
+
+  branch_repo = BranchRepository(session)
+  branch = await branch_repo.get_by_id(branch_id)
+
+  if branch is None:
+    await callback.answer("Филиал топилмади", show_alert=True)
+    return
+
+  registration_service = SupplierRegistrationService(session)
+  suppliers = await registration_service.get_available_suppliers(branch_id)
+  busy_supplier_ids = await registration_service.get_busy_supplier_ids(branch_id)
+
+  if not suppliers:
+    await callback.answer(
+      "Бу филиалда ҳозирча фирмалар йўқ. Админ Excel юклагандан кейин қайта урининг.",
+      show_alert=True,
+    )
+    return
+
+  await state.update_data(branch_id=branch_id, branch_name=branch.name)
+  await state.set_state(SupplierRegistrationStates.waiting_company)
+
+  await callback.message.edit_reply_markup(reply_markup=None)
+  await callback.message.answer(
+    f"✅ Филиал: {branch.name}\n\n"
+    f"{suppliers_selection_text(suppliers, page=0, busy_supplier_ids=busy_supplier_ids)}",
     reply_markup=suppliers_selection_keyboard(suppliers, page=0),
   )
+  await callback.answer()
 
 
 @router.callback_query(
@@ -110,10 +178,21 @@ async def process_company_page(
   session,
 ) -> None:
   page = int(callback.data.replace(REG_PAGE_PREFIX, ""))
-  registration_service = SupplierRegistrationService(session)
-  suppliers = await registration_service.get_available_suppliers()
+  data = await state.get_data()
+  branch_id = data.get("branch_id")
 
-  await callback.message.edit_reply_markup(
+  if branch_id is None:
+    await callback.answer("Хатолик юз берди. /start билан қайта бошланг.", show_alert=True)
+    return
+
+  registration_service = SupplierRegistrationService(session)
+  suppliers = await registration_service.get_available_suppliers(branch_id)
+  busy_supplier_ids = await registration_service.get_busy_supplier_ids(branch_id)
+
+  await callback.message.edit_text(
+    suppliers_selection_text(
+      suppliers, page=page, busy_supplier_ids=busy_supplier_ids
+    ),
     reply_markup=suppliers_selection_keyboard(suppliers, page=page),
   )
   await callback.answer()
@@ -129,6 +208,12 @@ async def process_company_selection(
   session,
 ) -> None:
   supplier_id = int(callback.data.replace(REG_SUPPLIER_PREFIX, ""))
+  data = await state.get_data()
+  branch_id = data.get("branch_id")
+
+  if branch_id is None:
+    await callback.answer("Хатолик юз берди. /start билан қайта бошланг.", show_alert=True)
+    return
 
   from app.repositories.supplier import SupplierRepository
 
@@ -139,8 +224,9 @@ async def process_company_selection(
     await callback.answer("Фирма топилмади", show_alert=True)
     return
 
-  if supplier.telegram_id is not None:
-    await callback.answer("Бу фирма аллақачон рўйхатдан ўтган", show_alert=True)
+  registration_service = SupplierRegistrationService(session)
+  if supplier_id in await registration_service.get_busy_supplier_ids(branch_id):
+    await callback.answer("Бу фирма бу филиалда аллақачон рўйхатдан ўтган", show_alert=True)
     return
 
   await state.update_data(supplier_id=supplier_id, supplier_name=supplier.name)
@@ -246,8 +332,10 @@ async def process_phone_contact(
   data = await state.get_data()
   supplier_id = data.get("supplier_id")
   supplier_name = data.get("supplier_name", "")
+  branch_id = data.get("branch_id")
+  branch_name = data.get("branch_name", "")
 
-  if supplier_id is None:
+  if supplier_id is None or branch_id is None:
     await state.clear()
     await message.answer("Хатолик юз берди. /start билан қайта бошланг.")
     return
@@ -261,6 +349,7 @@ async def process_phone_contact(
       full_name=full_name,
       phone=phone,
       supplier_id=supplier_id,
+      branch_id=branch_id,
     )
   except SupplierRegistrationError as exc:
     await state.clear()
@@ -277,6 +366,7 @@ async def process_phone_contact(
 
   await message.answer(
     f"✅ Рўйхатдан ўтиш муваффақиятли!\n\n"
+    f"📍 Филиал: {branch_name}\n"
     f"🏭 Фирма: {supplier_name}\n"
     f"📱 Телефон: {phone}\n\n"
     "Энди инвентар маълумотларини кўришингиз мумкин.",

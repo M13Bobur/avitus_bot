@@ -14,6 +14,7 @@ from app.repositories.notification import NotificationRepository
 from app.repositories.supplier import SupplierRepository
 from app.services.app_settings import AppSettingsService
 from app.services.excel_import import ExcelImportError, ExcelImportService, ImportRow
+from app.services.supplier_context import SupplierContextService
 
 logger = get_logger(__name__)
 
@@ -22,6 +23,8 @@ logger = get_logger(__name__)
 class SupplierLowStockAlert:
   supplier_id: int
   supplier_name: str
+  branch_id: int
+  branch_name: str
   telegram_id: int | None
   threshold: int
   items: list[tuple[str, str, Decimal]] = field(default_factory=list)
@@ -38,6 +41,7 @@ class InventoryService:
     self._notification_repo = NotificationRepository(session)
     self._app_settings = AppSettingsService(session)
     self._excel_import = ExcelImportService()
+    self._supplier_context = SupplierContextService(session)
 
   async def get_low_stock_threshold(self) -> int:
     return await self._app_settings.get_low_stock_threshold()
@@ -46,10 +50,16 @@ class InventoryService:
     await self._app_settings.set_low_stock_threshold(threshold)
 
   async def import_excel(
-    self, file_path: str, file_name: str, user: User
+    self, file_path: str, file_name: str, user: User, branch_id: int
   ) -> tuple[int, int, list[SupplierLowStockAlert]]:
+    branch = await self._branch_repo.get_by_id(branch_id)
+    if branch is None:
+      raise ValueError("Филиал топилмади.")
+
     try:
-      rows = self._excel_import.validate_and_read(file_path, file_name)
+      rows = self._excel_import.validate_and_read(
+        file_path, file_name, fixed_branch=branch.name
+      )
     except ExcelImportError as exc:
       await self._import_log_repo.create(
         user_id=user.id,
@@ -72,18 +82,23 @@ class InventoryService:
     threshold = await self.get_low_stock_threshold()
 
     supplier_cache: dict[str, int] = {}
-    branch_cache: dict[str, int] = {}
     medicine_cache: dict[str, int] = {}
-    alerts: dict[int, SupplierLowStockAlert] = {}
+    alerts: dict[tuple[int, int], SupplierLowStockAlert] = {}
 
     for row in rows:
       try:
-        await self._process_row(
-          row, supplier_cache, branch_cache, medicine_cache, threshold, alerts
-        )
+        async with self._session.begin_nested():
+          await self._process_row(
+            row,
+            branch_id=branch_id,
+            branch_name=branch.name,
+            supplier_cache=supplier_cache,
+            medicine_cache=medicine_cache,
+            threshold=threshold,
+            alerts=alerts,
+          )
         processed += 1
       except Exception as exc:
-        await self._session.rollback()
         skipped += 1
         logger.warning("import_row_failed", error=str(exc), medicine=row.medicine)
 
@@ -108,30 +123,33 @@ class InventoryService:
   async def _process_row(
     self,
     row: ImportRow,
+    *,
+    branch_id: int,
+    branch_name: str,
     supplier_cache: dict[str, int],
-    branch_cache: dict[str, int],
     medicine_cache: dict[str, int],
     threshold: int,
-    alerts: dict[int, SupplierLowStockAlert],
+    alerts: dict[tuple[int, int], SupplierLowStockAlert],
   ) -> None:
     supplier_id = supplier_cache.get(row.supplier)
     if supplier_id is None:
       supplier = await self._supplier_repo.get_or_create(row.supplier)
       supplier_id = supplier.id
       supplier_cache[row.supplier] = supplier_id
-      if supplier_id not in alerts:
-        alerts[supplier_id] = SupplierLowStockAlert(
-          supplier_id=supplier_id,
-          supplier_name=supplier.name,
-          telegram_id=supplier.telegram_id,
-          threshold=threshold,
-        )
 
-    branch_id = branch_cache.get(row.branch)
-    if branch_id is None:
-      branch = await self._branch_repo.get_or_create(row.branch)
-      branch_id = branch.id
-      branch_cache[row.branch] = branch_id
+    alert_key = (supplier_id, branch_id)
+    if alert_key not in alerts:
+      telegram_id = await self._supplier_context.get_supplier_telegram_id(
+        supplier_id, branch_id
+      )
+      alerts[alert_key] = SupplierLowStockAlert(
+        supplier_id=supplier_id,
+        supplier_name=supplier.name,
+        branch_id=branch_id,
+        branch_name=branch_name,
+        telegram_id=telegram_id,
+        threshold=threshold,
+      )
 
     medicine_id = medicine_cache.get(row.medicine)
     if medicine_id is None:
@@ -159,22 +177,28 @@ class InventoryService:
       except Exception as exc:
         logger.warning("notification_create_failed", error=str(exc), medicine=row.medicine)
 
-      alert = alerts.get(supplier_id)
+      alert = alerts.get(alert_key)
       if alert is not None:
-        alert.items.append((row.medicine, row.branch, row.quantity))
+        alert.items.append((row.medicine, branch_name, row.quantity))
 
-  async def get_supplier_summary(self, supplier_id: int) -> dict[str, int | datetime | None]:
-    return await self._inventory_repo.get_supplier_summary(supplier_id)
+  async def get_supplier_summary(
+    self, supplier_id: int, branch_id: int
+  ) -> dict[str, int | datetime | None]:
+    return await self._inventory_repo.get_supplier_summary(supplier_id, branch_id)
 
-  async def get_branch_report(self, supplier_id: int) -> list[tuple[str, list[tuple[str, int]]]]:
-    grouped = await self._inventory_repo.get_by_supplier_grouped_by_branch(supplier_id)
+  async def get_branch_report(
+    self, supplier_id: int, branch_id: int
+  ) -> list[tuple[str, list[tuple[str, int]]]]:
+    grouped = await self._inventory_repo.get_by_supplier_grouped_by_branch(
+      supplier_id, branch_id=branch_id
+    )
     return [
       (branch.name, [(medicine.name, qty) for medicine, qty in items])
       for branch, items in grouped
     ]
 
   async def search_medicine(
-    self, supplier_id: int, query: str
+    self, supplier_id: int, branch_id: int, query: str
   ) -> list[tuple[str, list[tuple[str, int]]]]:
     medicines = await self._medicine_repo.search_by_name(query)
     if not medicines:
@@ -183,7 +207,7 @@ class InventoryService:
     results: list[tuple[str, list[tuple[str, int]]]] = []
     for medicine in medicines:
       records = await self._inventory_repo.get_by_supplier_and_medicine(
-        supplier_id, medicine.id
+        supplier_id, medicine.id, branch_id=branch_id
       )
       branch_quantities = [(record.branch.name, record.quantity) for record in records]
       if branch_quantities:

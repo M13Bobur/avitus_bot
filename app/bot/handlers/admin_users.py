@@ -1,3 +1,5 @@
+import html
+
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -45,17 +47,20 @@ def _list_text(total: int, *, query: str | None = None) -> str:
     return f"🔍 «{query}» бўйича топилди: {total} та\n\nКўриш ёки ўчириш учун танланг:"
   if total == 0:
     return "👤 Фойдаланувчилар топилмади."
-  return f"👤 Фойдаланувчилар (жами: {total})\n\nКўриш ёки ўчириш учун танланг:"
+  return f"👤 Telegram фойдаланувчилар (жами: {total})\n\nБу рўйхат — ботга кирган одамлар (админ ва етказиб берувчилар).\nФирма номларини кўриш: 🏭 Етказиб берувчилар\n\nКўриш ёки ўчириш учун танланг:"
 
 
 def _detail_text(user: User) -> str:
-  firm = user.supplier.name if user.supplier is not None else "—"
-  phone = user.phone or "—"
+  firm = html.escape(user.supplier.name) if user.supplier is not None else "—"
+  branch = html.escape(user.branch.name) if user.branch is not None else "—"
+  phone = html.escape(user.phone or "—")
+  full_name = html.escape(user.full_name)
   return (
-    f"{role_label(user.role)} {user.full_name}\n\n"
+    f"{role_label(user.role)} {full_name}\n\n"
     f"🆔 Telegram ID: {user.telegram_id}\n"
     f"📱 Телефон: {phone}\n"
     f"👔 Рол: {_role_name(user.role)}\n"
+    f"📍 Филиал: {branch}\n"
     f"🏭 Фирма: {firm}"
   )
 
@@ -127,7 +132,9 @@ async def view_user(callback: CallbackQuery, session) -> None:
   await callback.answer()
 
 
-@router.callback_query(F.data.startswith(USERS_DELETE_PREFIX))
+@router.callback_query(
+  F.data.startswith(USERS_DELETE_PREFIX) & ~F.data.startswith(USERS_DELETE_CONFIRM_PREFIX)
+)
 async def delete_user_prompt(
   callback: CallbackQuery, session, db_user: User
 ) -> None:
@@ -145,17 +152,20 @@ async def delete_user_prompt(
     await callback.answer("Фойдаланувчи топилмади.", show_alert=True)
     return
 
-  firm = user.supplier.name if user.supplier is not None else "—"
+  firm = html.escape(user.supplier.name) if user.supplier is not None else "—"
+  branch = html.escape(user.branch.name) if user.branch is not None else "—"
+  full_name = html.escape(user.full_name)
   warning = ""
   if user.role == UserRole.SUPPLIER.value and user.supplier is not None:
     warning = (
-      "\n\n♻️ Ўчиргандан сўнг фирма бўшайди ва унга бошқа "
-      "одамни тайинлаш мумкин бўлади."
+      "\n\n♻️ Ўчиргандан сўнг бу филиалдаги фирма бўшайди ва "
+      "унга бошқа одамни тайинлаш мумкин бўлади."
     )
 
   await callback.message.edit_text(
     f"❓ Қуйидаги фойдаланувчини ўчиришни тасдиқлайсизми?\n\n"
-    f"{role_label(user.role)} {user.full_name}\n"
+    f"{role_label(user.role)} {full_name}\n"
+    f"📍 Филиал: {branch}\n"
     f"🏭 Фирма: {firm}{warning}",
     reply_markup=user_delete_confirm_keyboard(user.id),
   )
@@ -175,6 +185,24 @@ async def delete_user_confirm(
     return
 
   service = UserManagementService(session)
+  user = await service.get_user(user_id)
+
+  if user is None:
+    await callback.answer("Фойдаланувчи топилмади.", show_alert=True)
+    return
+
+  if user.role == UserRole.SUPER_ADMIN.value:
+    all_users = await service.get_all_users()
+    admin_count = sum(
+      1 for item in all_users if item.role == UserRole.SUPER_ADMIN.value
+    )
+    if admin_count <= 1:
+      await callback.answer(
+        "⛔ Системада ягона админни ўчириб бўлмайди.",
+        show_alert=True,
+      )
+      return
+
   deleted = await service.delete_user(user_id)
 
   if deleted is None:

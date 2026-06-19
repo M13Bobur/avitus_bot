@@ -15,6 +15,12 @@ class BranchRepository(BaseRepository[Branch]):
     )
     return result.scalar_one_or_none()
 
+  async def get_all_ordered(self) -> list[Branch]:
+    result = await self._session.execute(
+      select(Branch).order_by(Branch.name)
+    )
+    return list(result.scalars().all())
+
   async def get_or_create(self, name: str) -> Branch:
     branch = await self.get_by_name(name)
     if branch is not None:
