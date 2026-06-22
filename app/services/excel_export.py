@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
 from app.logging_config import get_logger
@@ -12,6 +13,8 @@ from app.repositories.inventory import InventoryRepository
 logger = get_logger(__name__)
 
 EXPORT_COLUMNS = ["Филиал", "Наименование", "Кол-во", "Дата"]
+DATE_COLUMN_INDEX = EXPORT_COLUMNS.index("Дата") + 1
+RIGHT_ALIGNMENT = Alignment(horizontal="right")
 
 
 def _format_excel_columns(file_path: str) -> None:
@@ -27,6 +30,15 @@ def _format_excel_columns(file_path: str) -> None:
 
     worksheet.column_dimensions[get_column_letter(col_idx)].width = min(max_length + 3, 60)
 
+  for row in worksheet.iter_rows(
+    min_row=1,
+    max_row=worksheet.max_row,
+    min_col=DATE_COLUMN_INDEX,
+    max_col=DATE_COLUMN_INDEX,
+  ):
+    for cell in row:
+      cell.alignment = RIGHT_ALIGNMENT
+
   workbook.save(file_path)
   workbook.close()
 
@@ -40,6 +52,11 @@ class ExcelExportService:
   ) -> tuple[str, int]:
     records = await self._inventory_repo.get_by_supplier(
       supplier_id, branch_id=branch_id
+    )
+    records = sorted(
+      records,
+      key=lambda record: (record.report_date, record.medicine.name),
+      reverse=True,
     )
 
     data = [
