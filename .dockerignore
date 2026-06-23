@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.venv
+venv
+__pycache__
+*.py[cod]
+*.sql
+backup*
+.idea
+.vscode
+tmp
+temp
+*.log
+*.xlsx
+*.xls

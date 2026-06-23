@@ -5,6 +5,7 @@ from app.repositories.inventory import InventoryRepository
 from app.repositories.medicine import MedicineRepository
 from app.repositories.notification import NotificationRepository
 from app.repositories.supplier import SupplierRepository
+from app.repositories.support_message import SupportMessageRepository
 from app.repositories.user import UserRepository
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
   "MedicineRepository",
   "NotificationRepository",
   "SupplierRepository",
+  "SupportMessageRepository",
   "UserRepository",
 ]

@@ -15,6 +15,14 @@ BTN_BRANCH_REPORT = "📍 Филиал ҳисоботи"
 BTN_DOWNLOAD_EXCEL = "📥 Excel юклаб олиш"
 BTN_SEARCH_MEDICINE = "🔍 Дорини қидириш"
 BTN_SHARE_PHONE = "📱 Телефон рақамини улашиш"
+BTN_CONTACT_ADMIN = "✉️ Админга хабар"
+
+BTN_MESSAGES = "💬 Хабарлар"
+
+MSG_WRITE_TO_ADMIN = "✍️ Хабаризни ёзинг:"
+MSG_SENT_TO_ADMIN = "✅ Хабарингиз админга юборилди."
+MSG_EMPTY = "Хабар бўш бўлмаслиги керак."
+MSG_TOO_LONG = "Хабар жуда узун. Қискарок ёзинг."
 
 BTN_BACK = "◀️ Орқага"
 BTN_NEXT = "Кейинги ▶️"

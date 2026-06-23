@@ -7,20 +7,27 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, Message
 
 from app.bot.filters.role import IsSupplier
-from app.bot.keyboards.menus import supplier_menu_keyboard
+from app.bot.keyboards.menus import cancel_keyboard, supplier_menu_keyboard
 from app.bot.states.supplier import SupplierStates
 from app.bot.texts import (
   BTN_BRANCH_REPORT,
+  BTN_CANCEL,
+  BTN_CONTACT_ADMIN,
   BTN_DOWNLOAD_EXCEL,
   BTN_INVENTORY_REPORT,
   BTN_SEARCH_MEDICINE,
   LABEL_NOT_AVAILABLE,
+  MSG_EMPTY,
+  MSG_SENT_TO_ADMIN,
+  MSG_TOO_LONG,
+  MSG_WRITE_TO_ADMIN,
 )
 from app.database.models import User
 from app.logging_config import get_logger
 from app.repositories.inventory import InventoryRepository
 from app.services.excel_export import ExcelExportService
 from app.services.inventory import InventoryService
+from app.services.support_message import SupportMessageError, SupportMessageService
 from app.services.supplier_context import SupplierContextError, SupplierContextService
 from app.utils.quantity import format_quantity
 from app.utils.telegram import split_message_parts
@@ -228,4 +235,41 @@ async def search_medicine_result(
     message,
     lines,
     reply_markup=supplier_menu_keyboard(),
+  )
+
+
+@router.message(F.text == BTN_CONTACT_ADMIN)
+async def contact_admin_prompt(message: Message, state: FSMContext) -> None:
+  await state.set_state(SupplierStates.waiting_admin_message)
+  await message.answer(MSG_WRITE_TO_ADMIN, reply_markup=cancel_keyboard())
+
+
+@router.message(StateFilter(SupplierStates.waiting_admin_message), F.text)
+async def contact_admin_send(
+  message: Message,
+  session,
+  state: FSMContext,
+  db_user: User,
+) -> None:
+  if message.text == BTN_CANCEL:
+    await state.clear()
+    await message.answer("Бекор қилинди.", reply_markup=supplier_menu_keyboard())
+    return
+
+  text = message.text.strip() if message.text else ""
+  service = SupportMessageService(session)
+
+  try:
+    saved = await service.send_message(db_user, text)
+  except SupportMessageError as exc:
+    await message.answer(str(exc))
+    return
+
+  await service.notify_admins(message.bot, db_user, saved.text)
+  await state.clear()
+  await message.answer(MSG_SENT_TO_ADMIN, reply_markup=supplier_menu_keyboard())
+  logger.info(
+    "support_message_sent",
+    user_id=db_user.id,
+    message_id=saved.id,
   )

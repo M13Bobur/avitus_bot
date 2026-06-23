@@ -14,6 +14,7 @@ from sqlalchemy import (
   Text,
   UniqueConstraint,
   func,
+  text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -47,6 +48,9 @@ class User(Base):
 
   supplier: Mapped["Supplier | None"] = relationship("Supplier", back_populates="users")
   branch: Mapped["Branch | None"] = relationship("Branch", back_populates="users")
+  support_messages: Mapped[list["SupportMessage"]] = relationship(
+    "SupportMessage", back_populates="user", passive_deletes=True
+  )
 
 
 class Supplier(Base):
@@ -166,3 +170,27 @@ class AppSetting(Base):
   id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
   key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
   value: Mapped[str] = mapped_column(String(500), nullable=False)
+
+
+class SupportMessage(Base):
+  __tablename__ = "support_messages"
+  __table_args__ = (
+    Index("ix_support_messages_user_id_created_at", "user_id", "created_at"),
+    Index(
+      "ix_support_messages_user_id_unread",
+      "user_id",
+      postgresql_where=text("is_read = false"),
+    ),
+  )
+
+  id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+  user_id: Mapped[int] = mapped_column(
+    Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+  )
+  text: Mapped[str] = mapped_column(Text, nullable=False)
+  is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+  created_at: Mapped[datetime] = mapped_column(
+    DateTime(timezone=True), server_default=func.now(), nullable=False
+  )
+
+  user: Mapped["User"] = relationship("User", back_populates="support_messages")

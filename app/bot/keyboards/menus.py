@@ -8,8 +8,10 @@ from app.bot.texts import (
   BTN_BRANCH_REPORT,
   BTN_BRANCHES,
   BTN_CANCEL,
+  BTN_CONTACT_ADMIN,
   BTN_DOWNLOAD_EXCEL,
   BTN_INVENTORY_REPORT,
+  BTN_MESSAGES,
   BTN_NEXT,
   BTN_SEARCH_MEDICINE,
   BTN_SETTINGS,
@@ -232,7 +234,8 @@ def supplier_menu_keyboard() -> ReplyKeyboardMarkup:
   builder.button(text=BTN_BRANCH_REPORT)
   builder.button(text=BTN_DOWNLOAD_EXCEL)
   builder.button(text=BTN_SEARCH_MEDICINE)
-  builder.adjust(2, 2)
+  builder.button(text=BTN_CONTACT_ADMIN)
+  builder.adjust(2, 2, 1)
   return builder.as_markup(resize_keyboard=True)
 
 
@@ -244,7 +247,8 @@ def admin_menu_keyboard() -> ReplyKeyboardMarkup:
   builder.button(text=BTN_SUPPLIERS)
   builder.button(text=BTN_USERS)
   builder.button(text=BTN_SETTINGS)
-  builder.adjust(2, 2, 2)
+  builder.button(text=BTN_MESSAGES)
+  builder.adjust(2, 2, 2, 1)
   return builder.as_markup(resize_keyboard=True)
 
 

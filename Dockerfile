@@ -2,16 +2,20 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+ENV PIP_DEFAULT_TIMEOUT=1000 \
+    PIP_RETRIES=15 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_BUILD_ATTEMPTS=5
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     gfortran \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-# numpy 2.x wheels require X86_V2; pin 1.x for older/emulated CPUs
-RUN pip install --no-cache-dir "numpy>=1.26.4,<2.0" \
-    && pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt scripts/docker_build_slow.sh ./
+RUN chmod +x docker_build_slow.sh \
+    && ./docker_build_slow.sh
 
 COPY . .
 
